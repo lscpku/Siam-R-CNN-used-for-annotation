@@ -1,11 +1,11 @@
-# VisualTracking_SiamR-CNN_ML-Project
+# Visual Tracking ML-Project implemented on SiamR-CNN
 
 This is Visual-Tracking machine learning project implemented on SiamR-CNN which is based on Faster R-CNN with visualization, written in Python3 and powered by TensorFlow 1.
 
-We borrow a lot of code from TensorPack's Faster R-CNN example: 
+We borrow some code from TensorPack's Faster R-CNN example: 
 https://github.com/tensorpack/tensorpack/tree/master/examples/FasterRCNN
 
-And Siam R-CNN example: Visual Tracking by Re-Detection:
+And from Siam R-CNN example: Visual Tracking by Re-Detection:
 https://github.com/VisualComputingInstitute/SiamR-CNN
 
 ## Installation
