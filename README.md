@@ -1,10 +1,12 @@
-# Siam R-CNN: Visual Tracking by Re-Detection
-### Paul Voigtlaender, Jonathon Luiten, Philip H.S. Torr, Bastian Leibe
-The corresponding project page can be found here: https://www.vision.rwth-aachen.de/page/siamrcnn
+# VisualTracking_SiamR-CNN_ML-Project
 
-This software is written in Python3 and powered by TensorFlow 1.
+This is Visual-Tracking machine learning project implemented on SiamR-CNN which is based on Faster R-CNN with visualization, written in Python3 and powered by TensorFlow 1.
 
-We borrow a lot of code from TensorPack's Faster R-CNN example: https://github.com/tensorpack/tensorpack/tree/master/examples/FasterRCNN
+We borrow a lot of code from TensorPack's Faster R-CNN example: 
+https://github.com/tensorpack/tensorpack/tree/master/examples/FasterRCNN
+
+And Siam R-CNN example: Visual Tracking by Re-Detection:
+https://github.com/VisualComputingInstitute/SiamR-CNN
 
 ## Installation
 
@@ -53,35 +55,3 @@ python3 tracking/do_tracking.py --main main_otb
 ```
 
 The result will then be written to tracking_data/results/
-
-## Training
-Download the pre-trained Mask R-CNN model from http://models.tensorpack.com/FasterRCNN/COCO-MaskRCNN-R101FPN9xGNCasAugScratch.npz
-
-Now change the paths to the training datasets in config.py, e.g.
-```
-_C.DATA.IMAGENET_VID_ROOT = "/globalwork/data/ILSVRC_VID/ILSVRC/"
-```
-there you can also enable and disable different datasets, e.g.
-```
-_C.DATA.IMAGENET_VID = True
-```
-
-To run the main training (without hard example mining):
-```
-python3 train.py --load /path/to/COCO-R101FPN-MaskRCNN-ScratchGN.npz
-```
-
-## Hints about the code
-In the code, we sometimes use the terminology "ThreeStageTracker" or three stages. This refers to the Tracklet Dynamic Programming Algorithm (TDPA).
-
-In order to make the code more readable, we removed some parts before publishing. If there's an important feature which you are missing, please write us an email at voigtlaender@vision.rwth-aachen.de
-
-In the current version of the code, the functions to pre-compute the features for hard example mining are not available, but we can share the pre-computed data on request.
-
-## References
-If you find this code useful, please cite
-```
-Siam R-CNN: Visual Tracking by Re-Detection
-Paul Voigtlaender, Jonathon Luiten, Philip H.S. Torr, Bastian Leibe.
-IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 2020.
-```
