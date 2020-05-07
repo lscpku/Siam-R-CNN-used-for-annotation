@@ -56,4 +56,18 @@ python3 tracking/do_tracking.py --main main_otb
 
 The result will then be written to tracking_data/results/
 ## Visualization
-这里需要写可视化的步骤 @瑞
+Create folder
+```
+cd ..
+mkdir Visualization
+cd Visualization
+mkdir images
+cd ..
+cd SiamR-CNN
+```
+
+Then run visualization.py
+```
+python3 visualization.py
+```
+The video will then be written to Visualization/
