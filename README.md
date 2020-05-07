@@ -42,8 +42,8 @@ cd train_log
 wget --no-check-certificate -r -nH --cut-dirs=2 --no-parent --reject="index.html*" https://omnomnom.vision.rwth-aachen.de/data/siamrcnn/hard_mining3/
 cd ..
 ```
-## Evaluation
-For evaluation, first set the path to the dataset on which you want to evaluate in tracking/do_tracking.py, e.g.
+## Running Tracking and Evaluation
+First set the path to the dataset on which you want to evaluate in tracking/do_tracking.py, e.g.
 ```
 OTB_2015_ROOT_DIR = '/data/otb2015/'
 ```
@@ -55,3 +55,5 @@ python3 tracking/do_tracking.py --main main_otb
 ```
 
 The result will then be written to tracking_data/results/
+## Visualization
+这里需要写可视化的步骤 @瑞
