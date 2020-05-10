@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # File: train.py
 
+# 内置模块
 import argparse
 import itertools
 import numpy as np
@@ -14,6 +15,7 @@ assert six.PY3, "FasterRCNN requires Python 3!"
 import tensorflow as tf
 import tqdm
 
+# tensorpack关于神经网络操作的API
 import tensorpack.utils.viz as tpviz
 from tensorpack import *
 from tensorpack.tfutils import optimizer
@@ -21,6 +23,7 @@ from tensorpack.tfutils.common import get_tf_version_tuple, get_tensors_by_names
 from tensorpack.tfutils.summary import add_moving_summary
 from tensorpack.tfutils.varreplace import freeze_variables
 
+# 自定义模块
 import model_frcnn
 import model_mrcnn
 from basemodel import image_preprocess, resnet_c4_backbone, resnet_conv5, resnet_fpn_backbone, backbone_scope
@@ -40,18 +43,22 @@ try:
 except ImportError:
     pass
 
-
+# 网络模型的基类
 class DetectionModel(ModelDesc):
+    # 重组一个image的channel顺序，转化为神经网络能处理的格式
     def preprocess(self, image):
         image = tf.expand_dims(image, 0)
-        image = image_preprocess(image, bgr=True)
+        image = image_preprocess(image, bgr=True) # basemodel的
         return tf.transpose(image, [0, 3, 1, 2])
 
+    # 返回网络是否准备用于训练的状态（否则是预测状态）
     @property
     def training(self):
         return get_current_tower_context().is_training
 
+    # 返回一个优化器
     def optimizer(self):
+        # 学习率
         lr = tf.get_variable('learning_rate', initializer=0.003, trainable=False)
         tf.summary.scalar('learning_rate-summary', lr)
 
@@ -62,6 +69,7 @@ class DetectionModel(ModelDesc):
             opt = optimizer.AccumGradOptimizer(opt, 8 // cfg.TRAIN.NUM_GPUS)
         return opt
 
+    # 返回一些网络相关的名称（输出、模块）
     def get_inference_tensor_names(self):
         """
         Returns two lists of tensor names to be used to create an inference callable.
@@ -82,17 +90,22 @@ class DetectionModel(ModelDesc):
         else:
             return ['image'], out
 
+    # 建计算图
     def build_graph(self, *inputs):
         inputs = dict(zip(self.input_names, inputs))
 
-        image = self.preprocess(inputs['image'])  # 1CHW
+        image = self.preprocess(inputs['image'])  # 1CHW，转化图片格式
 
+        # 在ResNet传播，得到feature map
         features = self.backbone(image)
         anchor_inputs = {k: v for k, v in inputs.items() if k.startswith('anchor_')}
         if cfg.EXTRACT_GT_FEATURES:
             anchor_inputs["roi_boxes"] = inputs["roi_boxes"]
+            
+        # 进入rpn网络得到目标的region proposals
         proposals, rpn_losses = self.rpn(image, features, anchor_inputs)  # inputs?
 
+        # 计算rpn输出的bboxes的损失
         targets = [inputs[k] for k in ['gt_boxes', 'gt_labels', 'gt_masks'] if k in inputs]
         head_losses = self.roi_heads(image, features, proposals, targets)
 
@@ -106,11 +119,15 @@ class DetectionModel(ModelDesc):
 
 
 class ResNetC4Model(DetectionModel):
+    # 返回网络的一些数据格式
     def inputs(self):
         ret = [
+            # 图像的三维矩阵
             tf.placeholder(tf.float32, (None, None, 3), 'image'),
+            # 分别是rpn预测的anchor的类置信度和坐标偏差量
             tf.placeholder(tf.int32, (None, None, cfg.RPN.NUM_ANCHOR), 'anchor_labels'),
             tf.placeholder(tf.float32, (None, None, cfg.RPN.NUM_ANCHOR, 4), 'anchor_boxes'),
+            # rpn的ground truth的值
             tf.placeholder(tf.float32, (None, 4), 'gt_boxes'),
             tf.placeholder(tf.int64, (None,), 'gt_labels')]  # all > 0
         if cfg.MODE_MASK:
@@ -119,9 +136,11 @@ class ResNetC4Model(DetectionModel):
             )  # NR_GT x height x width
         return ret
 
+    # 主干网络resnet
     def backbone(self, image):
         return [resnet_c4_backbone(image, cfg.BACKBONE.RESNET_NUM_BLOCKS[:3])]
 
+    # rpn网络的前向传播（这部分不需要改。。我也没看）
     def rpn(self, image, features, inputs):
         featuremap = features[0]
         rpn_label_logits, rpn_box_logits = rpn_head('rpn', featuremap, cfg.RPN.HEAD_DIM, cfg.RPN.NUM_ANCHOR)
@@ -145,6 +164,7 @@ class ResNetC4Model(DetectionModel):
 
         return BoxProposals(proposal_boxes), losses
 
+    # 计算rpn网络的loss（这部分也不需要改）
     def roi_heads(self, image, features, proposals, targets):
         image_shape2d = tf.shape(image)[2:]  # h,w
         featuremap = features[0]
@@ -205,11 +225,14 @@ class ResNetC4Model(DetectionModel):
             return []
 
 
+# ResNet + FPN的结构
 class ResNetFPNModel(DetectionModel):
 
     def inputs(self):
         ret = [
+            # 输入图像矩阵的格式
             tf.placeholder(tf.float32, (None, None, 3), 'image')]
+        # anchor相关的数据
         num_anchors = len(cfg.RPN.ANCHOR_RATIOS)
         for k in range(len(cfg.FPN.ANCHOR_STRIDES)):
             ret.extend([
@@ -228,16 +251,19 @@ class ResNetFPNModel(DetectionModel):
             ret.append(tf.placeholder(tf.float32, (None, 4,), 'roi_boxes'))
         return ret
 
+    # 从网络输出的feature map：p23456中将anchors对应的截取出来
     def slice_feature_and_anchors(self, p23456, anchors):
         for i, stride in enumerate(cfg.FPN.ANCHOR_STRIDES):
             with tf.name_scope('FPN_slice_lvl{}'.format(i)):
                 anchors[i] = anchors[i].narrow_to(p23456[i])
 
+    # 网络正向传播，先经过resnet_fpn_backbone，再fpn
     def backbone(self, image):
         c2345 = resnet_fpn_backbone(image, cfg.BACKBONE.RESNET_NUM_BLOCKS)
         p23456 = fpn_model('fpn', c2345)
         return p23456
 
+    # rpn（这里也不用改）
     def rpn(self, image, features, inputs):
         if cfg.EXTRACT_GT_FEATURES:
             boxes = inputs['roi_boxes']
@@ -272,6 +298,7 @@ class ResNetFPNModel(DetectionModel):
 
         return BoxProposals(proposal_boxes), losses
 
+    # 3-级联的检测heads
     def roi_heads(self, image, features, proposals, targets):
         image_shape2d = tf.shape(image)[2:]  # h,w
         assert len(features) == 5, "Features have to be P23456!"
