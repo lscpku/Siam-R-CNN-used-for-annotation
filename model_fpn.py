@@ -19,6 +19,7 @@ from utils.box_ops import area as tf_area
 
 @layer_register(log_shape=True)
 def fpn_model(features):
+    #输出是fpn的p23456，p2345对应resnet输入的c2345，p6是最大池化
     """
     Args:
         features ([tf.Tensor]): ResNet features c2-c5
@@ -49,8 +50,9 @@ def fpn_model(features):
                   kernel_initializer=tf.variance_scaling_initializer(scale=1.)):
         lat_2345 = [Conv2D('lateral_1x1_c{}'.format(i + 2), c, num_channel, 1)
                     for i, c in enumerate(features)]
-        if use_gn:
+        if use_gn: # True
             lat_2345 = [GroupNorm('gn_c{}'.format(i + 2), c) for i, c in enumerate(lat_2345)]
+        # 2345的方向conv2d，归一化
         lat_sum_5432 = []
         for idx, lat in enumerate(lat_2345[::-1]):
             if idx == 0:
@@ -58,16 +60,19 @@ def fpn_model(features):
             else:
                 lat = lat + upsample2x('upsample_lat{}'.format(6 - idx), lat_sum_5432[-1])
                 lat_sum_5432.append(lat)
+        # 5432的方向，每个加上前一个unpool的结果
         p2345 = [Conv2D('posthoc_3x3_p{}'.format(i + 2), c, num_channel, 3)
                  for i, c in enumerate(lat_sum_5432[::-1])]
         if use_gn:
             p2345 = [GroupNorm('gn_p{}'.format(i + 2), c) for i, c in enumerate(p2345)]
+        # 2345的方向conv2d，归一化
         p6 = MaxPooling('maxpool_p6', p2345[-1], pool_size=1, strides=2, data_format='channels_first', padding='VALID')
         return p2345 + [p6]
 
 
 @under_name_scope()
 def fpn_map_rois_to_levels(boxes):
+    # 在2-5层框上boxes……（为下面multilevel_roi_align函数服务
     """
     Assign boxes to level 2~5.
 
@@ -102,6 +107,7 @@ def fpn_map_rois_to_levels(boxes):
 
 @under_name_scope()
 def multilevel_roi_align(features, rcnn_boxes, resolution):
+    # 分层在feature map上框上boxes
     """
     Args:
         features ([tf.Tensor]): 4 FPN feature level 2-5
@@ -112,15 +118,16 @@ def multilevel_roi_align(features, rcnn_boxes, resolution):
     """
     assert len(features) == 4, features
     # Reassign rcnn_boxes to levels
-    level_ids, level_boxes = fpn_map_rois_to_levels(rcnn_boxes)
+    level_ids, level_boxes = fpn_map_rois_to_levels(rcnn_boxes) #在每一层重新画框
     all_rois = []
 
     # Crop patches from corresponding levels
     for i, boxes, featuremap in zip(itertools.count(), level_boxes, features):
         with tf.name_scope('roi_level{}'.format(i + 2)):
             boxes_on_featuremap = boxes * (1.0 / cfg.FPN.ANCHOR_STRIDES[i])
-            all_rois.append(roi_align(featuremap, boxes_on_featuremap, resolution))
+            all_rois.append(roi_align(featuremap, boxes_on_featuremap, resolution)) #分层align boxes到feature map上
 
+    #下面调整顺序
     # this can fail if using TF<=1.8 with MKL build
     all_rois = tf.concat(all_rois, axis=0)  # NCHW
     # Unshuffle to the original order, to match the original samples
@@ -132,6 +139,7 @@ def multilevel_roi_align(features, rcnn_boxes, resolution):
 
 @under_name_scope()
 def neck_roi_align(features, rcnn_boxes, resolution):
+    #没有重新去画框……train里并没有调用这个函数，好像谁也没调用这个函数（
     """
     Args:
         features ([tf.Tensor]): 4 FPN feature level 2-5
@@ -145,7 +153,7 @@ def neck_roi_align(features, rcnn_boxes, resolution):
     for i in range(4):
         with tf.name_scope('roi_level{}'.format(i + 2)):
             boxes_on_featuremap = rcnn_boxes * (1.0 / cfg.FPN.ANCHOR_STRIDES[i])
-            level_features = roi_align(features[i], boxes_on_featuremap, resolution)
+            level_features = roi_align(features[i], boxes_on_featuremap, resolution) #这里align然后底下相加
             if aligned_features is None:
                 aligned_features = level_features
             else:
@@ -155,6 +163,7 @@ def neck_roi_align(features, rcnn_boxes, resolution):
 
 def multilevel_rpn_losses(
         multilevel_anchors, multilevel_label_logits, multilevel_box_logits):
+    #字面意思orz……每一层算label和box的rpn loss的结果
     """
     Args:
         multilevel_anchors: #lvl RPNAnchors
@@ -176,7 +185,7 @@ def multilevel_rpn_losses(
             label_loss, box_loss = rpn_losses(
                 anchors.gt_labels, anchors.encoded_gt_boxes(),
                 multilevel_label_logits[lvl], multilevel_box_logits[lvl],
-                name_scope='level{}'.format(lvl + 2))
+                name_scope='level{}'.format(lvl + 2))#分层算rpn loss
             losses.extend([label_loss, box_loss])
 
         total_label_loss = tf.add_n(losses[::2], name='label_loss')
@@ -188,11 +197,11 @@ def multilevel_rpn_losses(
 @under_name_scope()
 def generate_fpn_proposals(
         multilevel_pred_boxes, multilevel_label_logits, image_shape2d):
+    #分层用rpn的generator预测boxes，然后再挑分数最大的k个boxes
     """
     Args:
         multilevel_pred_boxes: #lvl HxWxAx4 boxes
         multilevel_label_logits: #lvl tensors of shape HxWxA
-
     Returns:
         boxes: kx4 float
         scores: k logits
@@ -204,7 +213,7 @@ def generate_fpn_proposals(
     training = get_current_tower_context().is_training
     all_boxes = []
     all_scores = []
-    if cfg.FPN.PROPOSAL_MODE == 'Level':
+    if cfg.FPN.PROPOSAL_MODE == 'Level': #True
         fpn_nms_topk = cfg.RPN.TRAIN_PER_LEVEL_NMS_TOPK if training else cfg.RPN.TEST_PER_LEVEL_NMS_TOPK
         for lvl in range(num_lvl):
             with tf.name_scope('Lvl{}'.format(lvl + 2)):
@@ -212,7 +221,7 @@ def generate_fpn_proposals(
                 proposal_boxes, proposal_scores = generate_rpn_proposals(
                     tf.reshape(pred_boxes_decoded, [-1, 4]),
                     tf.reshape(multilevel_label_logits[lvl], [-1]),
-                    image_shape2d, fpn_nms_topk)
+                    image_shape2d, fpn_nms_topk) #对每一层用generate_rpn_proposals预测box和score
                 all_boxes.append(proposal_boxes)
                 all_scores.append(proposal_scores)
 
@@ -221,9 +230,9 @@ def generate_fpn_proposals(
         # Here we are different from Detectron.
         # Detectron picks top-k within the batch, rather than within an image. However we do not have a batch.
         proposal_topk = tf.minimum(tf.size(proposal_scores), fpn_nms_topk)
-        proposal_scores, topk_indices = tf.nn.top_k(proposal_scores, k=proposal_topk, sorted=False)
-        proposal_boxes = tf.gather(proposal_boxes, topk_indices)
-    else:
+        proposal_scores, topk_indices = tf.nn.top_k(proposal_scores, k=proposal_topk, sorted=False) #找出来最大的k个score
+        proposal_boxes = tf.gather(proposal_boxes, topk_indices) #最大的k个score对应的boxes
+    else:#这时候cfg.FPN.PROPOSAL_MODE是joint
         for lvl in range(num_lvl):
             with tf.name_scope('Lvl{}'.format(lvl + 2)):
                 pred_boxes_decoded = multilevel_pred_boxes[lvl]
@@ -231,10 +240,12 @@ def generate_fpn_proposals(
                 all_scores.append(tf.reshape(multilevel_label_logits[lvl], [-1]))
         all_boxes = tf.concat(all_boxes, axis=0)
         all_scores = tf.concat(all_scores, axis=0)
+        #所有层的boxes和score
         proposal_boxes, proposal_scores = generate_rpn_proposals(
             all_boxes, all_scores, image_shape2d,
             cfg.RPN.TRAIN_PRE_NMS_TOPK if training else cfg.RPN.TEST_PRE_NMS_TOPK,
             cfg.RPN.TRAIN_POST_NMS_TOPK if training else cfg.RPN.TEST_POST_NMS_TOPK)
+        #rpn预测boxes和score
 
     tf.sigmoid(proposal_scores, name='probs')  # for visualization
     return tf.stop_gradient(proposal_boxes, name='boxes'), \
