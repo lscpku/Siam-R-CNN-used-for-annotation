@@ -40,15 +40,14 @@ def proposal_metrics(iou):
 
 @under_name_scope()
 def sample_fast_rcnn_targets(boxes, gt_boxes, gt_labels):
+    #返回的是一个BoxProposals类，这个类里面是选出来的框、框的label和它们和gt的关系
     """
     Sample some boxes from all proposals for training.
     #fg is guaranteed to be > 0, because ground truth boxes will be added as proposals.
-
     Args:
         boxes: nx4 region proposals, floatbox
         gt_boxes: mx4, floatbox
         gt_labels: m, int32
-
     Returns:
         A BoxProposals instance.
         sampled_boxes: tx4 floatbox, the rois
@@ -58,6 +57,10 @@ def sample_fast_rcnn_targets(boxes, gt_boxes, gt_labels):
     """
     iou = pairwise_iou(boxes, gt_boxes)     # nxm
     proposal_metrics(iou)
+    """
+    pairwise_iou这个函数计算boxes和gt_boxes之间的pairwise intersection-over-union，
+    输出是a tensor with shape [n, m] representing pairwise iou scores.
+    """
 
     # add ground truth as proposals as well
     boxes = tf.concat([boxes, gt_boxes], axis=0)    # (n+m) x 4
@@ -65,6 +68,7 @@ def sample_fast_rcnn_targets(boxes, gt_boxes, gt_labels):
     # #proposal=n+m from now on
 
     def sample_fg_bg(iou):
+        #这个函数就是随机取一部分的前景和背景
         fg_mask = tf.reduce_max(iou, axis=1) >= cfg.FRCNN.FG_THRESH
 
         fg_inds = tf.reshape(tf.where(fg_mask), [-1])
@@ -103,12 +107,12 @@ def sample_fast_rcnn_targets(boxes, gt_boxes, gt_labels):
 
 @layer_register(log_shape=True)
 def fastrcnn_outputs(feature, num_classes, class_agnostic_regression=False):
+    # 经过全连接层，输出分类和回归结果（label和boxes）
     """
     Args:
         feature (any shape):
         num_classes(int): num_category + 1
         class_agnostic_regression (bool): if True, regression to N x 1 x 4
-
     Returns:
         cls_logits: N x num_class classification logits
         reg_logits: N x num_classx4 or Nx2x4 if class agnostic
@@ -126,31 +130,34 @@ def fastrcnn_outputs(feature, num_classes, class_agnostic_regression=False):
 
 @under_name_scope()
 def fastrcnn_losses(labels, label_logits, fg_boxes, fg_box_logits):
+    # fastrcnn的label和box的损失函数
     """
     Args:
         labels: n,
         label_logits: nxC
         fg_boxes: nfgx4, encoded
         fg_box_logits: nfgxCx4 or nfgx1x4 if class agnostic
-
     Returns:
         label_loss, box_loss
     """
+    # 这里开始是label loss
     label_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
         labels=labels, logits=label_logits)
-    if cfg.FRCNN.USE_FOCAL_LOSS:
+
+    if cfg.FRCNN.USE_FOCAL_LOSS: #False
         indices = tf.stack((tf.cast(tf.range(tf.shape(labels)[0]), tf.int64), labels), axis=1)
         posteriors = tf.nn.softmax(label_logits, axis=1)
         gathered_posteriors = tf.gather_nd(posteriors, indices)
         gamma = 2.0
         label_loss = 5 * (1 - gathered_posteriors) ** gamma * label_loss
     # possibly upweight the foreground labels for balancing
-    if cfg.FRCNN.FG_LOSS_WEIGHTING_FACTOR != 1.0:
+    if cfg.FRCNN.FG_LOSS_WEIGHTING_FACTOR != 1.0: # True，加权
         label_loss *= (tf.constant(cfg.FRCNN.FG_LOSS_WEIGHTING_FACTOR - 1.0, dtype=tf.float32) * \
                       tf.cast(labels > 0, tf.float32)) + 1.0
 
-    label_loss = tf.reduce_mean(label_loss, name='label_loss')
+    label_loss = tf.reduce_mean(label_loss, name='label_loss')# 取平均
 
+    # 下面这段找到前景的labels和boxes
     fg_inds = tf.where(labels > 0)[:, 0]
     fg_labels = tf.gather(labels, fg_inds)
     num_fg = tf.size(fg_inds, out_type=tf.int64)
@@ -161,7 +168,8 @@ def fastrcnn_losses(labels, label_logits, fg_boxes, fg_box_logits):
         fg_box_logits = tf.gather_nd(fg_box_logits, indices)
     else:
         fg_box_logits = tf.reshape(fg_box_logits, [-1, 4])
-
+    
+    # 这段计算几个数值
     with tf.name_scope('label_metrics'), tf.device('/cpu:0'):
         prediction = tf.argmax(label_logits, axis=1, name='label_prediction')
         correct = tf.cast(tf.equal(prediction, labels), tf.float32)  # boolean/integer gather is unavailable on GPU
@@ -173,6 +181,7 @@ def fastrcnn_losses(labels, label_logits, fg_boxes, fg_box_logits):
         fg_accuracy = tf.where(
             empty_fg, 0., tf.reduce_mean(tf.gather(correct, fg_inds)), name='fg_accuracy')
 
+    # 下面计算前景的boxes的loss
     box_loss = tf.losses.huber_loss(
         fg_boxes, fg_box_logits, reduction=tf.losses.Reduction.SUM)
     box_loss *= cfg.FRCNN.BOX_LOSS_WEIGHTING_FACTOR
@@ -186,13 +195,12 @@ def fastrcnn_losses(labels, label_logits, fg_boxes, fg_box_logits):
 
 @under_name_scope()
 def fastrcnn_predictions(boxes, scores):
+    # 两次筛出，输出最终挑选的结果
     """
     Generate final results from predictions of all proposals.
-
     Args:
         boxes: n#classx4 floatbox in float32
         scores: nx#class
-
     Returns:
         boxes: Kx4
         scores: K
@@ -204,10 +212,10 @@ def fastrcnn_predictions(boxes, scores):
     scores = tf.transpose(scores[:, 1:], [1, 0])  # #catxn
 
     def f(X):
+        # 通过输入的score和boxes输出该选哪些boxes,用阈值卡一下再nms去除多余的边框
         """
         prob: n probabilities
         box: nx4 boxes
-
         Returns: n boolean, the selection
         """
         prob, box = X
@@ -237,14 +245,16 @@ def fastrcnn_predictions(boxes, scores):
                 sparse_values=True,
                 default_value=False)
         return mask
-
+    
+    # 这一段是针对score和boxes用f(X)进行挑选，选择该用哪些boxes
     # TF bug in version 1.11, 1.12: https://github.com/tensorflow/tensorflow/issues/22750
     buggy_tf = get_tf_version_tuple() in [(1, 11), (1, 12)]
     masks = tf.map_fn(f, (scores, boxes), dtype=tf.bool,
                       parallel_iterations=1 if buggy_tf else 10)     # #cat x N
     selected_indices = tf.where(masks)  # #selection x 2, each is (cat_id, box_id)
     scores = tf.boolean_mask(scores, masks)
-
+    
+    # 然后再去取top score的框
     # filter again by sorting scores
     topk_scores, topk_indices = tf.nn.top_k(
         scores,
@@ -253,6 +263,7 @@ def fastrcnn_predictions(boxes, scores):
     filtered_selection = tf.gather(selected_indices, topk_indices)
     cat_ids, box_ids = tf.unstack(filtered_selection, axis=1)
 
+    
     final_scores = tf.identity(topk_scores, name='scores')
     final_labels = tf.add(cat_ids, 1, name='labels')
     final_ids = tf.stack([cat_ids, box_ids], axis=1, name='all_ids')
@@ -263,7 +274,7 @@ def fastrcnn_predictions(boxes, scores):
 """
 FastRCNN heads for FPN:
 """
-
+# 这一大块好像后来后来都没啥用（
 
 @layer_register(log_shape=True)
 def fastrcnn_2fc_head(feature):
@@ -326,7 +337,6 @@ class BoxProposals(object):
             boxes: Nx4
             labels: N, each in [0, #class), the true label for each input box
             fg_inds_wrt_gt: #fg, each in [0, M)
-
         The last four arguments could be None when not training.
         """
         for k, v in locals().items():
@@ -335,16 +345,19 @@ class BoxProposals(object):
 
     @memoized_method
     def fg_inds(self):
+        # 框起来物体的框号
         """ Returns: #fg indices in [0, N-1] """
         return tf.reshape(tf.where(self.labels > 0), [-1], name='fg_inds')
 
     @memoized_method
     def fg_boxes(self):
+        # 框起来物体的框
         """ Returns: #fg x4"""
         return tf.gather(self.boxes, self.fg_inds(), name='fg_boxes')
 
     @memoized_method
     def fg_labels(self):
+        # 框起来物体的框的label
         """ Returns: #fg"""
         return tf.gather(self.labels, self.fg_inds(), name='fg_labels')
 
@@ -353,6 +366,7 @@ class FastRCNNHead(object):
     """
     A class to process & decode inputs/outputs of a fastrcnn classification+regression head.
     """
+    # 函数名字写的都挺直白的……encode和decode在处理真实的框坐标和归一化的bounding box之间的转换
     def __init__(self, proposals, box_logits, label_logits, gt_boxes, bbox_regression_weights):
         """
         Args:
