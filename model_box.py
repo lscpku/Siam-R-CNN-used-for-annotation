@@ -10,7 +10,7 @@ from tensorpack.tfutils.scope_utils import under_name_scope
 from config import config
 
 
-@under_name_scope()
+@under_name_scope()	# 截取box
 def clip_boxes(boxes, window, name=None):
     """
     Args:
@@ -23,13 +23,12 @@ def clip_boxes(boxes, window, name=None):
     return boxes
 
 
-@under_name_scope()
+@under_name_scope() # box 从target解码，返回坐标和大小
 def decode_bbox_target(box_predictions, anchors):
     """
     Args:
         box_predictions: (..., 4), logits
         anchors: (..., 4), floatbox. Must have the same shape
-
     Returns:
         box_decoded: (..., 4), float32. With the same shape.
     """
@@ -52,13 +51,12 @@ def decode_bbox_target(box_predictions, anchors):
     return tf.reshape(out, orig_shape)
 
 
-@under_name_scope()
+@under_name_scope() # box 坐标编码成target
 def encode_bbox_target(boxes, anchors):
     """
     Args:
         boxes: (..., 4), float32
         anchors: (..., 4), float32
-
     Returns:
         box_encoded: (..., 4), float32 with the same shape.
     """
@@ -79,11 +77,11 @@ def encode_bbox_target(boxes, anchors):
     return tf.reshape(encoded, tf.shape(boxes))
 
 
-@under_name_scope()
+@under_name_scope()  # 重写tf.image.crop_and_resize，调用时 crop_and_resize( image[None, None, :, :], boxes, [0], target)[0][0]
+# 期望把5*5的image，剪裁成2*2的box，再放大到4*4
 def crop_and_resize(image, boxes, box_ind, crop_size, pad_border=True):
     """
     Aligned version of tf.image.crop_and_resize, following our definition of floating point boxes.
-
     Args:
         image: NCHW
         boxes: nx4, x1y1x2y2
@@ -101,22 +99,19 @@ def crop_and_resize(image, boxes, box_ind, crop_size, pad_border=True):
         image = tf.pad(image, [[0, 0], [0, 0], [1, 1], [1, 1]], mode='SYMMETRIC')
         boxes = boxes + 1
 
-    @under_name_scope()
+    @under_name_scope() # 返回坐标y1x1y2x2 - This function transform fpcoor boxes to a format to be used by tf.image.crop_and_resize
     def transform_fpcoor_for_tf(boxes, image_shape, crop_shape):
         """
         The way tf.image.crop_and_resize works (with normalized box):
         Initial point (the value of output[0]): x0_box * (W_img - 1)
         Spacing: w_box * (W_img - 1) / (W_crop - 1)
         Use the above grid to bilinear sample.
-
         However, what we want is (with fpcoor box):
         Spacing: w_box / W_crop
         Initial point: x0_box + spacing/2 - 0.5
         (-0.5 because bilinear sample (in my definition) assumes floating point coordinate
          (0.0, 0.0) is the same as pixel value (0, 0))
-
         This function transform fpcoor boxes to a format to be used by tf.image.crop_and_resize
-
         Returns:
             y1x1y2x2
         """
@@ -153,14 +148,13 @@ def crop_and_resize(image, boxes, box_ind, crop_size, pad_border=True):
     return ret
 
 
-@under_name_scope()
+@under_name_scope() # 对齐		
 def roi_align(featuremap, boxes, resolution):
     """
     Args:
         featuremap: 1xCxHxW
         boxes: Nx4 floatbox
         resolution: output spatial resolution
-
     Returns:
         NxCx res x res
     """
@@ -172,20 +166,20 @@ def roi_align(featuremap, boxes, resolution):
     ret = tf.nn.avg_pool(ret, [1, 1, 2, 2], [1, 1, 2, 2], padding='SAME', data_format='NCHW')
     return ret
 
-
+# RPN 相关的三个函数，会调用上面的encode和decode
 class RPNAnchors(namedtuple('_RPNAnchors', ['boxes', 'gt_labels', 'gt_boxes'])):
     """
     boxes (FS x FS x NA x 4): The anchor boxes.
     gt_labels (FS x FS x NA):
     gt_boxes (FS x FS x NA x 4): Groundtruth boxes corresponding to each anchor.
     """
-    def encoded_gt_boxes(self):
+    def encoded_gt_boxes(self):	#  box 编码
         return encode_bbox_target(self.gt_boxes, self.boxes)
 
-    def decode_logits(self, logits):
+    def decode_logits(self, logits): #  box 解码
         return decode_bbox_target(logits, self.boxes)
 
-    @under_name_scope()
+    @under_name_scope()	# 分割 anchor
     def narrow_to(self, featuremap):
         """
         Slice anchors to the spatial size of this featuremap.
@@ -198,7 +192,7 @@ class RPNAnchors(namedtuple('_RPNAnchors', ['boxes', 'gt_labels', 'gt_boxes'])):
         gt_boxes = tf.slice(self.gt_boxes, [0, 0, 0, 0], slice4d)
         return RPNAnchors(boxes, gt_labels, gt_boxes)
 
-
+# 两个print用于对比 tf.image.crop_and_resize 和 修改过的crop_and_resize区别
 if __name__ == '__main__':
     """
     Demonstrate what's wrong with tf.image.crop_and_resize:
@@ -219,7 +213,6 @@ if __name__ == '__main__':
     7 7.5 8 8.5
     9.5 10 10.5 11
     12 12.5 13 13.5
-
     You cannot easily get the above results with tf.image.crop_and_resize.
     Try out yourself here:
     """
