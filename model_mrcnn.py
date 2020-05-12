@@ -12,7 +12,7 @@ from basemodel import GroupNorm
 from config import config as cfg
 
 
-@under_name_scope()
+@under_name_scope()  # 计算loss
 def maskrcnn_loss(mask_logits, fg_labels, fg_target_masks):
     """
     Args:
@@ -51,7 +51,7 @@ def maskrcnn_loss(mask_logits, fg_labels, fg_target_masks):
     return loss
 
 
-@layer_register(log_shape=True)
+@layer_register(log_shape=True) #调用时，norm=GN 或 NONE，4个卷积层。
 def maskrcnn_upXconv_head(feature, num_category, num_convs, norm=None):
     """
     Args:
@@ -59,7 +59,6 @@ def maskrcnn_upXconv_head(feature, num_category, num_convs, norm=None):
         num_category(int):
         num_convs (int): number of convolution layers
         norm (str or None): either None or 'GN'
-
     Returns:
         mask_logits (N x num_category x 2s x 2s):
     """
@@ -78,10 +77,12 @@ def maskrcnn_upXconv_head(feature, num_category, num_convs, norm=None):
         l = Conv2D('conv', l, num_category, 1)
     return l
 
+# 以下两种不同的调用 maskrcnn，不同的归一化方法。
 
+# norm 为 NONE 的调用
 def maskrcnn_up4conv_head(*args, **kwargs):
     return maskrcnn_upXconv_head(*args, num_convs=4, **kwargs)
 
-
+# norm 为 GN 的调用,Group normalization 组归一化
 def maskrcnn_up4conv_gn_head(*args, **kwargs):
     return maskrcnn_upXconv_head(*args, num_convs=4, norm='GN', **kwargs)
