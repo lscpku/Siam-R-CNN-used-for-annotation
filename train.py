@@ -782,6 +782,7 @@ if __name__ == '__main__':
 
     max_epoch = min(cfg.TRAIN.LR_SCHEDULE[-1] * factor // stepnum, cfg.TRAIN.MAX_NUM_EPOCHS)
 
+    # 调用tensorpack的模块？，传入模型参数
     traincfg = TrainConfig(
         model=MODEL,
         data=QueueInput(train_dataflow),
@@ -797,4 +798,5 @@ if __name__ == '__main__':
     else:
         # nccl mode appears faster than cpu mode
         trainer = SyncMultiGPUTrainerReplicated(cfg.TRAIN.NUM_GPUS, average=False, mode='nccl')
+    # 开始训练？
     launch_train_with_config(traincfg, trainer)
