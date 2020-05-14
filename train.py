@@ -102,14 +102,15 @@ class DetectionModel(ModelDesc):
         if cfg.EXTRACT_GT_FEATURES:
             anchor_inputs["roi_boxes"] = inputs["roi_boxes"]
             
-        # 进入rpn网络得到目标的region proposals
+        # 进入rpn网络得到目标的region proposals, 和rpn的损失
         proposals, rpn_losses = self.rpn(image, features, anchor_inputs)  # inputs?
 
-        # 计算rpn输出的bboxes的损失
         targets = [inputs[k] for k in ['gt_boxes', 'gt_labels', 'gt_masks'] if k in inputs]
+        # 进入全连接层，得到总检测网络的损失
         head_losses = self.roi_heads(image, features, proposals, targets)
 
         if self.training:
+            # 总损失 = rpn损失 + 总检测网络损失
             wd_cost = regularize_cost(
                 '.*/W', l2_regularizer(cfg.TRAIN.WEIGHT_DECAY), name='wd_cost')
             total_cost = tf.add_n(
@@ -140,7 +141,7 @@ class ResNetC4Model(DetectionModel):
     def backbone(self, image):
         return [resnet_c4_backbone(image, cfg.BACKBONE.RESNET_NUM_BLOCKS[:3])]
 
-    # rpn网络的前向传播（这部分不需要改。。我也没看）
+    # rpn网络的前向传播，返回proposals和rpn的损失（这部分不需要改。。我也没看）
     def rpn(self, image, features, inputs):
         featuremap = features[0]
         rpn_label_logits, rpn_box_logits = rpn_head('rpn', featuremap, cfg.RPN.HEAD_DIM, cfg.RPN.NUM_ANCHOR)
@@ -164,7 +165,7 @@ class ResNetC4Model(DetectionModel):
 
         return BoxProposals(proposal_boxes), losses
 
-    # 计算rpn网络的loss（这部分也不需要改）
+    # 全连接层head，返回预测的结果和总网络损失
     def roi_heads(self, image, features, proposals, targets):
         image_shape2d = tf.shape(image)[2:]  # h,w
         featuremap = features[0]
@@ -234,6 +235,7 @@ class ResNetFPNModel(DetectionModel):
             tf.placeholder(tf.float32, (None, None, 3), 'image')]
         # anchor相关的数据
         num_anchors = len(cfg.RPN.ANCHOR_RATIOS)
+        # FPN多个尺度的anchor
         for k in range(len(cfg.FPN.ANCHOR_STRIDES)):
             ret.extend([
                 tf.placeholder(tf.int32, (None, None, num_anchors),
@@ -251,9 +253,10 @@ class ResNetFPNModel(DetectionModel):
             ret.append(tf.placeholder(tf.float32, (None, 4,), 'roi_boxes'))
         return ret
 
-    # 从网络输出的feature map：p23456中将anchors对应的截取出来
+    # 不太清楚，工具函数，应该是将不同尺度的anchor和featuremap进行某些操作。。。
     def slice_feature_and_anchors(self, p23456, anchors):
         for i, stride in enumerate(cfg.FPN.ANCHOR_STRIDES):
+            # 遍历不同尺度
             with tf.name_scope('FPN_slice_lvl{}'.format(i)):
                 anchors[i] = anchors[i].narrow_to(p23456[i])
 
@@ -366,10 +369,11 @@ class ResNetFPNModel(DetectionModel):
                 tf.sigmoid(final_mask_logits, name='output/masks')
             return []
 
-
+# 用于track的最终模型
 class ResNetFPNTrackModel(ResNetFPNModel):
     def inputs(self):
         ret = super().inputs()
+        # 增加第一帧信息的一些名称
         if cfg.USE_PRECOMPUTED_REF_FEATURES:
             ret.append(tf.placeholder(tf.float32, (256, 7, 7), 'ref_features'))
         else:
@@ -391,12 +395,14 @@ class ResNetFPNTrackModel(ResNetFPNModel):
             ret.append(tf.placeholder(tf.float32, (None, 4,), 'roi_boxes'))
         return ret
 
+    # 主干卷积网络
     def backbone(self, image):
         c2345 = resnet_fpn_backbone(image, cfg.BACKBONE.RESNET_NUM_BLOCKS)
         with backbone_scope(freeze=cfg.BACKBONE.FREEZE_AT > 3):
             p23456 = fpn_model('fpn', c2345)
         return p23456, c2345
 
+    # rpn预测bboxes
     def rpn(self, image, features, inputs):
         if cfg.EXTRACT_GT_FEATURES:
             boxes = inputs['roi_boxes']
@@ -408,6 +414,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
         else:
             return super().rpn(image, features, inputs)
 
+    # Cascade全连接层
     def roi_heads(self, image, ref_features, ref_box, features, proposals, targets, hard_negative_features=None,
                   hard_positive_features=None, hard_positive_ious=None, hard_positive_gt_boxes=None,
                   hard_positive_jitter_boxes=None, precomputed_ref_features=None):
@@ -522,7 +529,8 @@ class ResNetFPNTrackModel(ResNetFPNModel):
                 final_mask_logits = tf.gather_nd(mask_logits, indices)  # #resultx28x28
                 tf.sigmoid(final_mask_logits, name='output/masks')
             return []
-
+        
+    # 建图
     def build_graph(self, *inputs):
         inputs = dict(zip(self.input_names, inputs))
         image = self.preprocess(inputs['image'])  # 1CHW
@@ -586,6 +594,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
             add_moving_summary(total_cost, wd_cost)
             return total_cost
 
+    # 该算法特有的第三阶段（不用改）
     def _run_third_stage(self, inputs, second_stage_features, image_hw):
         boxes, scores = get_tensors_by_names(['output/boxes', 'output/scores'])
         # let's fix (as in finalize) the boxes, so we can roi align only one time
@@ -603,6 +612,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
         tf.identity(sparse_tracklet_scores, name='sparse_tracklet_scores')
         tf.identity(tracklet_score_indices, name='tracklet_score_indices')
 
+    # 第二层Cascede的得分（不用改）
     def _score_for_third_stage(self, ref_feats, det_feats, dense=True, ref_boxes=None, det_boxes=None, image_hw=None,
                                tracklet_distance_threshold=0.08):
         # build all pairs
@@ -665,6 +675,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
         scores = posteriors[:, 1]
         return scores, indices
 
+    # tracklets相关的名称
     def get_inference_tensor_names(self):
         inp, out = super().get_inference_tensor_names()
         if cfg.USE_PRECOMPUTED_REF_FEATURES:
@@ -680,6 +691,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
         return inp, out
 
 
+    
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--load', help='load a model for evaluation or training. Can overwrite BACKBONE.WEIGHTS')
@@ -695,7 +707,9 @@ if __name__ == '__main__':
     if args.config:
         cfg.update_args(args.config)
 
+    # 网络模型对象
     MODEL = ResNetFPNTrackModel()
+    # 训练集？
     DetectionDataset()  # initialize the config with information from our dataset
 
     is_horovod = cfg.TRAINER == 'horovod'
@@ -720,7 +734,7 @@ if __name__ == '__main__':
     factor = 8. / cfg.TRAIN.NUM_GPUS
     for idx, steps in enumerate(cfg.TRAIN.LR_SCHEDULE[:-1]):
         mult = 0.1 ** (idx + 1)
-        lr_schedule.append(
+        lr_schedule.append( 
             (steps * factor // stepnum, cfg.TRAIN.BASE_LR * mult))
     logger.info("Warm Up Schedule (steps, value): " + str(warmup_schedule))
     logger.info("LR Schedule (epochs, value): " + str(lr_schedule))
