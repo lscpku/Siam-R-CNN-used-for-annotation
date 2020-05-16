@@ -578,10 +578,17 @@ class ResNetFPNTrackModel(ResNetFPNModel):
             concat_boxes = tf.concat([proposal_boxes, tracklet_boxes], axis=0)
             proposals = BoxProposals(concat_boxes)
 
-        head_losses = self.roi_heads(image, ref_features, ref_box, second_stage_features, proposals, targets,
+        head_losses_first = self.roi_heads(image, ref_features, ref_box, second_stage_features, proposals, targets,
                                      hard_negative_features, hard_positive_features, hard_positive_ious,
                                      hard_positive_gt_boxes, hard_positive_jitter_boxes,
                                      precomputed_ref_features=precomputed_ref_features)
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        targets
+        head_losses_half = self.roi_heads(image, ref_features, ref_box, second_stage_features, proposals, targets,
+                                     hard_negative_features, hard_positive_features, hard_positive_ious,
+                                     hard_positive_gt_boxes, hard_positive_jitter_boxes,
+                                     precomputed_ref_features=precomputed_ref_features)
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
         if cfg.MODE_THIRD_STAGE:
             self._run_third_stage(inputs, second_stage_features, tf.shape(image)[2:4])
