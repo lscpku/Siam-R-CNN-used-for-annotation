@@ -93,7 +93,7 @@ _C.DATA.DAVIS2017 = False
 _C.DATA.TRACKINGNET = False
 
 # FIXME
-_C.EXTRA_FEATURES = "half"
+_C.MODE_EXTRA_FEATURES = "half"
 
 # mode flags ---------------------
 _C.TRAINER = 'replicated'  # options: 'horovod', 'replicated'
