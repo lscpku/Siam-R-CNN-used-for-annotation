@@ -72,6 +72,9 @@ class ThreeStageTracker(PrecomputingReferenceTracker):
         self._ff_gt_tracklet_score_weight = ff_gt_tracklet_score_weight
         self._location_score_weight = location_score_weight
 
+        # FIXME
+        self.saved_feats = []
+
     def set_video_name(self, vid_name):
         self._video_name = vid_name
 
@@ -131,10 +134,14 @@ class ThreeStageTracker(PrecomputingReferenceTracker):
             active_tracklets_feats = np.stack([t.feats[-1] for t in active_tracklets], axis=0)
         resized_img, active_tracklets_boxes = self._resize_image_together_with_boxes(img,
                                                                                      active_tracklets_boxes_noresize)
+        
+        # FIXME
+        extra_feats = (self.saved_feats[self._time_idx // 2],) if cfg.MODE_EXTRA_FEATURES == "half" else ()
         boxes, scores, third_stage_feats_out, ff_gt_tracklet_scores, sparse_tracklet_scores, \
         tracklet_score_indices = self._pred_func(
                 resized_img, self._ff_gt_feats, self._ff_gt_tracklet.feats[-1],  active_tracklets_feats,
-                active_tracklets_boxes, self._tracklet_distance_threshold)
+                active_tracklets_boxes, self._tracklet_distance_threshold, *extra_feats)
+        
         boxes = resize_and_clip_boxes(img, resized_img, boxes)
         # for simplicity let's just convert it to a dense matrix. If that gets too large, we can still change it.
         tracklet_scores = scipy.sparse.coo_matrix((sparse_tracklet_scores, (tracklet_score_indices[:, 0],
@@ -233,6 +240,11 @@ class ThreeStageTracker(PrecomputingReferenceTracker):
         else:
             score = -1.0 + EPSILON * tracklet.ff_gt_scores[-1]
         # or we could select the best tracklet in current frame
+
+        # FIXME
+        if cfg.MODE_EXTRA_FEATURES is not None:
+            self.saved_feats.append(tracklet.feats[-1])
+
         return tracklet.boxes[-1], score
 
     if VIZ_WITH_OPENCV:

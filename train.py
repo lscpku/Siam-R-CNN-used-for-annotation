@@ -384,6 +384,11 @@ class ResNetFPNTrackModel(ResNetFPNModel):
             ret.append(tf.placeholder(tf.float32, (None, 256, 7, 7), 'active_tracklets_feats'))
             ret.append(tf.placeholder(tf.float32, (None, 4), 'active_tracklets_boxes'))
             ret.append(tf.placeholder(tf.float32, (), 'tracklet_distance_threshold'))
+        
+        # FIXME
+        if cfg.MODE_EXTRA_FEATURES:
+            ret.append(tf.placeholder(tf.float32, (256, 7, 7), 'extra_feats'))
+
         if cfg.MODE_HARD_MINING:
             ret.append(tf.placeholder(tf.float32, (None, 3, 256, 7, 7), 'hard_negative_features'))
             if cfg.MODE_IF_HARD_MINING_THEN_ALSO_POSITIVES:
@@ -695,6 +700,11 @@ class ResNetFPNTrackModel(ResNetFPNModel):
             inp.append('active_tracklets_feats')
             inp.append('active_tracklets_boxes')
             inp.append('tracklet_distance_threshold')
+        
+        # FIXME
+        if cfg.MODE_EXTRA_FEATURES is not None:
+            inp.append('extra_feats')
+
         return inp, out
 
 
