@@ -464,6 +464,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
                     reduced_features = Conv2D('conv_reduce', concat_features, 256, 1, activation=None)
             return reduced_features
         
+        # FIXME
         def roi_func_extra(boxes, already_aligned_features=None):
             if already_aligned_features is None:
                 aligned_features = multilevel_roi_align(features[:4], boxes, 7)
@@ -491,6 +492,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
                 cfg.HARD_POSITIVE_LOSS_SCALING_FACTOR, hard_positive_ious, hard_positive_gt_boxes,
                 hard_positive_jitter_boxes)
         else:
+            # FIXME
             if cfg.MODE_EXTRA_FEATURES:
                 fastrcnn_head = CascadeRCNNHead(
                     proposals, roi_func, fastrcnn_head_func,
@@ -618,14 +620,14 @@ class ResNetFPNTrackModel(ResNetFPNModel):
             tracklet_boxes = inputs['active_tracklets_boxes']
             concat_boxes = tf.concat([proposal_boxes, tracklet_boxes], axis=0)
             proposals = BoxProposals(concat_boxes)
-# ///////////      
+      
         extra_feats = inputs["extra_feats"]
         
         head_losses_first = self.roi_heads(image, ref_features, ref_box, second_stage_features, proposals, targets,
                                      hard_negative_features, hard_positive_features, hard_positive_ious,
                                      hard_positive_gt_boxes, hard_positive_jitter_boxes,
                                      precomputed_ref_features=precomputed_ref_features, extra_feats)
-# ///////////
+
 
         if cfg.MODE_THIRD_STAGE:
             self._run_third_stage(inputs, second_stage_features, tf.shape(image)[2:4])
