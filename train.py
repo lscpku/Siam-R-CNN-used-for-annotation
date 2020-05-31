@@ -549,7 +549,7 @@ class ResNetFPNTrackModel(ResNetFPNModel):
 
             return all_losses
         else:
-            decoded_boxes = fastrcnn_head.decoded_output_boxes() + fastrcnn_head_extra.decoded_output_boxes()
+            decoded_boxes = fastrcnn_head.decoded_output_boxes()
             decoded_boxes = clip_boxes(decoded_boxes, image_shape2d, name='fastrcnn_all_boxes')
             label_scores = fastrcnn_head.output_scores(name='fastrcnn_all_scores')
  
