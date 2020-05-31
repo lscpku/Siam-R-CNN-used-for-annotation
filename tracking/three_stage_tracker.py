@@ -95,6 +95,9 @@ class ThreeStageTracker(PrecomputingReferenceTracker):
         self._ff_gt_tracklet.add_detection(self._ff_gt_feats, self._ff_box, 1.0, 1.0)
         self._all_tracklets = [self._ff_gt_tracklet]
 
+        # FIXME
+        self.saved_feats.append(self._ff_gt_feats)
+
     def _make_pred_func(self, load):
         cfg.MODE_THIRD_STAGE = True
         from train import ResNetFPNTrackModel
